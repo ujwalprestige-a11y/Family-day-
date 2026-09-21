@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/session";
 import { buildWorkbook, exportFilename, type ExportEmployee } from "@/lib/export";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // GET /api/admin/export.xlsx — three-sheet workbook download. Session required.
 export async function GET(req: NextRequest) {

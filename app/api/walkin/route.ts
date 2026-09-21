@@ -5,6 +5,7 @@ import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId, normali
 import { wristbandTotal } from "@/lib/wristbands";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 interface WalkinBody {
   employee_id?: string;

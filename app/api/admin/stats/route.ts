@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/session";
 import { computeSummary, type ExportEmployee } from "@/lib/export";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // GET /api/admin/stats — tiles + full row data. Session required.
 export async function GET(req: NextRequest) {

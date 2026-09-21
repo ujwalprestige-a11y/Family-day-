@@ -5,6 +5,7 @@ import { isValidEmail, isValidMobile, isNonEmptyName, normaliseMobile } from "@/
 import { wristbandTotal } from "@/lib/wristbands";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 interface RegisterBody {
   full_name?: string;

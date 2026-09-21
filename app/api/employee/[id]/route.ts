@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // Full record for a single employee. Called only after the guest selects a
 // search result, so returning full email + mobile here is intentional.

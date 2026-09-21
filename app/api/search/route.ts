@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // Public search: min 2 chars, prefix on ID or contains on name, max 8 results,
 // masked mobile only. Rate-limited per client IP.
