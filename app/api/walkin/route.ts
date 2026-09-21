@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Status, Source } from "@prisma/client";
-import { isValidEmail, isValidMobile, isNonEmptyName, normaliseMobile } from "@/lib/validation";
+import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId, normaliseMobile } from "@/lib/validation";
 import { wristbandTotal } from "@/lib/wristbands";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
 
   const errors: Record<string, string> = {};
   if (!employee_id) errors.employee_id = "Enter your employee ID.";
+  else if (!isValidEmployeeId(employee_id)) errors.employee_id = "Employee ID must be exactly 6 digits.";
   if (!isNonEmptyName(full_name)) errors.full_name = "Enter your full name.";
   if (!isValidEmail(email)) errors.email = "Enter a valid email, like name@company.com.";
   if (!isValidMobile(mobileRaw)) errors.mobile = "Enter a 10-digit mobile number.";

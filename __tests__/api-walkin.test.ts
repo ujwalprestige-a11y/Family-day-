@@ -46,10 +46,24 @@ describe("POST /api/walkin", () => {
     expect(employee.paid_extended).toEqual([]);
   });
 
+  it("rejects an employee_id that is not exactly 6 digits (422)", async () => {
+    const short = await walkin(
+      req({ employee_id: "700", full_name: "Nope", email: "n@x.com", mobile: "9876543210" })
+    );
+    expect(short.status).toBe(422);
+    expect((await short.json()).errors.employee_id).toBeTruthy();
+
+    const long = await walkin(
+      req({ employee_id: "1234567", full_name: "Nope", email: "n@x.com", mobile: "9876543210" })
+    );
+    expect(long.status).toBe(422);
+    expect((await long.json()).errors.employee_id).toBeTruthy();
+  });
+
   it("rejects an employee_id that already exists (409)", async () => {
     await prisma.employee.create({
       data: {
-        employee_id: "700",
+        employee_id: "700000",
         full_name: "Existing",
         email: "e@x.com",
         mobile: "9000000000",
@@ -62,7 +76,7 @@ describe("POST /api/walkin", () => {
       },
     });
     const res = await walkin(
-      req({ employee_id: "700", full_name: "Dup", email: "d@d.com", mobile: "9876543210" })
+      req({ employee_id: "700000", full_name: "Dup", email: "d@d.com", mobile: "9876543210" })
     );
     expect(res.status).toBe(409);
     const body = await res.json();

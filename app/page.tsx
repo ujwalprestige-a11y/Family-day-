@@ -13,7 +13,7 @@ import {
   amountToCollect,
   formatINR,
 } from "@/lib/wristbands";
-import { isValidEmail, isValidMobile, isNonEmptyName } from "@/lib/validation";
+import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId } from "@/lib/validation";
 import type { EmployeeFull, SearchResult } from "@/lib/types";
 
 type Screen = "search" | "confirm" | "welcome" | "already" | "walkin";
@@ -188,6 +188,7 @@ export default function KioskPage() {
   async function submitWalkin() {
     const errs: Record<string, string> = {};
     if (!wId.trim()) errs.employee_id = "Enter your employee ID.";
+    else if (!isValidEmployeeId(wId)) errs.employee_id = "Employee ID must be exactly 6 digits.";
     if (!isNonEmptyName(wName)) errs.full_name = "Enter your full name.";
     if (!isValidEmail(wEmail)) errs.email = "Enter a valid email, like name@company.com.";
     if (!isValidMobile(wMobile)) errs.mobile = "Enter a 10-digit mobile number.";
@@ -474,10 +475,11 @@ export default function KioskPage() {
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
+              maxLength={6}
               placeholder="6-digit ID"
               className={wErr.employee_id ? "bad" : ""}
               value={wId}
-              onChange={(e) => setWId(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => setWId(e.target.value.replace(/\D/g, "").slice(0, 6))}
             />
             <div className="err">{wErr.employee_id}</div>
           </div>

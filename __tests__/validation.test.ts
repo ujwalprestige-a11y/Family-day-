@@ -3,6 +3,7 @@ import {
   isValidEmail,
   isValidMobile,
   isNonEmptyName,
+  isValidEmployeeId,
   normaliseMobile,
 } from "@/lib/validation";
 
@@ -40,6 +41,18 @@ describe("normaliseMobile", () => {
   });
   it("leaves short numbers short (caught by needs_review)", () => {
     expect(normaliseMobile("99001")).toBe("99001");
+  });
+});
+
+describe("isValidEmployeeId", () => {
+  it("accepts exactly 6 digits", () => {
+    expect(isValidEmployeeId("102314")).toBe(true);
+  });
+  it("rejects fewer or more than 6 digits and non-digits", () => {
+    expect(isValidEmployeeId("700")).toBe(false);
+    expect(isValidEmployeeId("1234567")).toBe(false);
+    expect(isValidEmployeeId("12a456")).toBe(false);
+    expect(isValidEmployeeId("")).toBe(false);
   });
 });
 

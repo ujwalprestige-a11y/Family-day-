@@ -38,3 +38,8 @@ export function normaliseMobile(value: string | null | undefined): string {
 export function isValidMobile(value: string | null | undefined): boolean {
   return /^\d{10}$/.test(normaliseMobile(value));
 }
+
+/** A new-guest employee ID must be exactly 6 digits. */
+export function isValidEmployeeId(value: string | null | undefined): boolean {
+  return /^\d{6}$/.test((value ?? "").trim());
+}
