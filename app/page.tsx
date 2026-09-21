@@ -51,6 +51,7 @@ export default function KioskPage() {
   const [wMobile, setWMobile] = useState("");
   const [wMarital, setWMarital] = useState("Single");
   const [wFam, setWFam] = useState<string[]>([]);
+  const [wPaid, setWPaid] = useState<string[]>([]);
   const [wErr, setWErr] = useState<Record<string, string>>({});
   const [wSubmitting, setWSubmitting] = useState(false);
 
@@ -181,6 +182,7 @@ export default function KioskPage() {
     setWMobile("");
     setWMarital("Single");
     setWFam([]);
+    setWPaid([]);
     setWErr({});
     setScreen("walkin");
   }
@@ -208,6 +210,7 @@ export default function KioskPage() {
           mobile: wMobile.trim(),
           marital_status: wMarital,
           family_members: wFam,
+          paid_extended: wPaid,
         }),
       });
       if (res.status === 409) {
@@ -553,7 +556,7 @@ export default function KioskPage() {
           </div>
           <div className="field">
             <span className="lbl">
-              Family members joining you{" "}
+              Free wristbands for family{" "}
               <span style={{ color: "var(--faint)", fontWeight: 500 }}>(optional)</span>
             </span>
             <div className="chips">
@@ -565,6 +568,31 @@ export default function KioskPage() {
                   onToggle={() => toggle(wFam, setWFam, o)}
                 />
               ))}
+            </div>
+          </div>
+          <div className="field">
+            <span className="lbl">Extended family (paid, ₹2,500 each)</span>
+            <div className="chips">
+              {PAID_EXTENDED.map((o) => (
+                <Chip
+                  key={o}
+                  label={o}
+                  paid
+                  pressed={wPaid.includes(o)}
+                  onToggle={() => toggle(wPaid, setWPaid, o)}
+                />
+              ))}
+            </div>
+            <p className="hint">Payment is collected at this desk.</p>
+          </div>
+          <div className="tally">
+            <div>
+              <small>Total wristbands, including you</small>
+              <b>{1 + wFam.length + wPaid.length}</b>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <small>Pay at desk</small>
+              <b style={{ fontSize: 24 }}>{formatINR(amountToCollect(wPaid))}</b>
             </div>
           </div>
           <div className="actions">

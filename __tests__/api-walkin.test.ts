@@ -26,7 +26,7 @@ describe("POST /api/walkin", () => {
     expect(errors.mobile).toBeTruthy();
   });
 
-  it("creates a walk-in with computed wristbands", async () => {
+  it("creates a walk-in with free family and paid extended, computing wristbands", async () => {
     const res = await walkin(
       req({
         employee_id: "888001",
@@ -35,6 +35,7 @@ describe("POST /api/walkin", () => {
         mobile: "9876543210",
         marital_status: "Single",
         family_members: ["Parent 1", "Parent 2"],
+        paid_extended: ["Sibling 1"],
       })
     );
     expect(res.status).toBe(201);
@@ -42,8 +43,8 @@ describe("POST /api/walkin", () => {
     expect(result).toBe("walkin");
     expect(employee.status).toBe("walk_in");
     expect(employee.source).toBe("walk_in");
-    expect(employee.wristbands_total).toBe(3); // 1 + 2 family
-    expect(employee.paid_extended).toEqual([]);
+    expect(employee.wristbands_total).toBe(4); // 1 self + 2 family + 1 paid
+    expect(employee.paid_extended).toEqual(["Sibling 1"]);
   });
 
   it("rejects an employee_id that is not exactly 6 digits (422)", async () => {

@@ -13,6 +13,7 @@ interface WalkinBody {
   mobile?: string;
   marital_status?: string;
   family_members?: string[];
+  paid_extended?: string[];
 }
 
 // POST /api/walkin — create a walk-in record. Rejects an employee_id that
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
   const mobile = normaliseMobile(mobileRaw);
   const marital_status = (body.marital_status ?? "").trim();
   const family_members = Array.isArray(body.family_members) ? body.family_members : [];
+  const paid_extended = Array.isArray(body.paid_extended) ? body.paid_extended : [];
 
   const errors: Record<string, string> = {};
   if (!employee_id) errors.employee_id = "Enter your employee ID.";
@@ -62,8 +64,8 @@ export async function POST(req: NextRequest) {
       mobile,
       marital_status,
       family_members,
-      paid_extended: [],
-      wristbands_total: wristbandTotal(family_members, []),
+      paid_extended,
+      wristbands_total: wristbandTotal(family_members, paid_extended),
       status: Status.walk_in,
       source: Source.walk_in,
       registered_at: new Date(),
