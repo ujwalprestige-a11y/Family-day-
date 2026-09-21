@@ -1,0 +1,52 @@
+// Prestige Family Day 2026 – Registration Desk
+// One row per CSV submission (no de-duplication): employee_id is NOT unique,
+// so the same person can appear multiple times and staff pick the right entry.
+// Postgres everywhere (local embedded Postgres in dev, Supabase in prod).
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Status {
+  not_registered
+  pre_registered
+  walk_in
+}
+
+enum Source {
+  master
+  walk_in
+}
+
+model Employee {
+  id               String    @id @default(cuid())
+  // The Microsoft Forms response "Id" — unique per submission, used to make
+  // re-imports idempotent. Null for walk-ins created at the desk.
+  form_id          String?   @unique
+
+  employee_id      String
+  full_name        String
+  email            String
+  mobile           String
+  marital_status   String
+  family_members   String[]
+  paid_extended    String[]
+  wristbands_total Int       @default(1)
+  status           Status    @default(not_registered)
+  source           Source    @default(master)
+  edited_fields    Json      @default("[]")
+  registered_at    DateTime?
+  needs_review     Boolean   @default(false)
+
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  @@index([employee_id])
+  @@index([full_name])
+}

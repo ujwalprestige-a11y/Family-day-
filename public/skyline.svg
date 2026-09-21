@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320" preserveAspectRatio="xMidYMax slice" fill="none" stroke="#A88944" stroke-width="2" stroke-linejoin="round">
+  <g opacity="0.9">
+    <!-- left cluster -->
+    <path d="M0 320 V210 H60 V150 H110 V210 H150 V120 H210 V80 H235 V120 H300 V320" />
+    <path d="M235 80 L235 60 L248 60" />
+    <!-- mid-left towers -->
+    <path d="M300 320 V170 H360 V110 H420 V170 H470 V230 H520 V320" />
+    <path d="M360 110 V70 H392 V110" />
+    <!-- central tall tower -->
+    <path d="M520 320 V140 H560 V60 H600 V20 H616 V60 H656 V140 H700 V320" />
+    <path d="M616 20 V4" />
+    <!-- mid-right -->
+    <path d="M700 320 V190 H760 V120 H820 V80 H852 V120 H910 V190 H960 V320" />
+    <path d="M820 80 V52 H840 V80" />
+    <!-- right cluster -->
+    <path d="M960 320 V150 H1015 V210 H1060 V110 H1120 V60 H1140 V110 H1200 V210 H1250 V320" />
+    <path d="M1140 60 L1140 40 L1152 40" />
+    <!-- far right -->
+    <path d="M1250 320 V180 H1310 V120 H1360 V180 H1410 V150 H1440 V320" />
+  </g>
+  <!-- a few window lines -->
+  <g opacity="0.5" stroke-width="1.5">
+    <path d="M566 90 H610 M566 110 H610 M566 130 H610" />
+    <path d="M126 170 H196 M126 190 H196" />
+    <path d="M1076 130 H1114 M1076 150 H1114 M1076 170 H1114" />
+    <path d="M726 210 H946 M726 240 H946 M726 270 H946" opacity="0.3" />
+  </g>
+</svg>

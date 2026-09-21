@@ -1,0 +1,41 @@
+{
+  "name": "family-day-registration-desk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prestige Family Day 2026 – Registration Desk kiosk app",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && prisma migrate deploy && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "import": "tsx scripts/import-master.ts",
+    "db:local": "tsx scripts/local-db.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "csv-parse": "^5.6.0",
+    "exceljs": "^4.4.0",
+    "iconv-lite": "^0.6.3",
+    "next": "15.1.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.4",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "embedded-postgres": "^17.5.0-beta.15",
+    "postcss": "^8.4.49",
+    "prisma": "^6.2.1",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
