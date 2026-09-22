@@ -106,7 +106,7 @@ export function FamilySelector({
       </div>
 
       <div className="field">
-        <span className="lbl">Extended family</span>
+        <span className="lbl">Extended family (₹2,500 each)</span>
         <div className="chips">
           <Chip
             label="Parent 1"
