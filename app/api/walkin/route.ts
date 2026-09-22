@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { Status, Source } from "@prisma/client";
 import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId, normaliseMobile } from "@/lib/validation";
 import { wristbandTotal } from "@/lib/wristbands";
+import { sendConfirmationEmail } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
@@ -74,6 +75,20 @@ export async function POST(req: NextRequest) {
       edited_fields: [],
     },
   });
+
+  // Send the confirmation email after the response is sent (non-blocking).
+  // Guarded so non-request contexts (e.g. unit tests) don't fail.
+  try {
+    after(async () => {
+      try {
+        await sendConfirmationEmail(employee);
+      } catch (err) {
+        console.error("[email] Failed to send confirmation (walkin):", err);
+      }
+    });
+  } catch {
+    /* `after` unavailable outside a request scope */
+  }
 
   return NextResponse.json({ result: "walkin", employee }, { status: 201 });
 }
