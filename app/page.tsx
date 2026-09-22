@@ -3,16 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Brand } from "@/components/Brand";
-import { Chip } from "@/components/Chip";
 import { CheckTick } from "@/components/CheckTick";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
-import {
-  freeFamilyOptions,
-  PAID_EXTENDED,
-  wristbandTotal,
-  amountToCollect,
-  formatINR,
-} from "@/lib/wristbands";
+import { FamilySelector } from "@/components/FamilySelector";
+import { wristbandTotal } from "@/lib/wristbands";
 import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId } from "@/lib/validation";
 import type { EmployeeFull, SearchResult } from "@/lib/types";
 
@@ -122,10 +116,6 @@ export default function KioskPage() {
     setReviewBanner(emp.needs_review || !isValidMobile(emp.mobile));
     setScreen("confirm");
   }
-
-  const toggle = (arr: string[], set: (v: string[]) => void, val: string) => {
-    set(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-  };
 
   async function confirmRegistration() {
     if (!current) return;
@@ -245,9 +235,7 @@ export default function KioskPage() {
   }, [screen, reset]);
 
   /* ------------------------------ view ------------------------------ */
-  const famOptions = current ? freeFamilyOptions(current.marital_status, famSel) : [];
   const tallyTotal = 1 + famSel.length + paidSel.length;
-  const tallyPay = amountToCollect(paidSel);
 
   return (
     <main>
@@ -375,42 +363,17 @@ export default function KioskPage() {
               <div className="err">{cErr.mobile}</div>
             </div>
           </div>
-          <div className="field">
-            <span className="lbl">Free wristbands for family</span>
-            <div className="chips">
-              {famOptions.map((o) => (
-                <Chip
-                  key={o}
-                  label={o}
-                  pressed={famSel.includes(o)}
-                  onToggle={() => toggle(famSel, setFamSel, o)}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <span className="lbl">Extended family (paid, ₹2,500 each)</span>
-            <div className="chips">
-              {PAID_EXTENDED.map((o) => (
-                <Chip
-                  key={o}
-                  label={o}
-                  paid
-                  pressed={paidSel.includes(o)}
-                  onToggle={() => toggle(paidSel, setPaidSel, o)}
-                />
-              ))}
-            </div>
-            <p className="hint">Payment is collected at this desk.</p>
-          </div>
+          <FamilySelector
+            maritalStatus={current.marital_status}
+            family={famSel}
+            onFamilyChange={setFamSel}
+            paid={paidSel}
+            onPaidChange={setPaidSel}
+          />
           <div className="tally">
             <div>
               <small>Total wristbands, including you</small>
               <b>{tallyTotal}</b>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <small>Pay at desk</small>
-              <b style={{ fontSize: 24 }}>{formatINR(tallyPay)}</b>
             </div>
           </div>
           <div className="actions">
@@ -554,45 +517,17 @@ export default function KioskPage() {
               ))}
             </div>
           </div>
-          <div className="field">
-            <span className="lbl">
-              Free wristbands for family{" "}
-              <span style={{ color: "var(--faint)", fontWeight: 500 }}>(optional)</span>
-            </span>
-            <div className="chips">
-              {freeFamilyOptions(wMarital, wFam).map((o) => (
-                <Chip
-                  key={o}
-                  label={o}
-                  pressed={wFam.includes(o)}
-                  onToggle={() => toggle(wFam, setWFam, o)}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <span className="lbl">Extended family (paid, ₹2,500 each)</span>
-            <div className="chips">
-              {PAID_EXTENDED.map((o) => (
-                <Chip
-                  key={o}
-                  label={o}
-                  paid
-                  pressed={wPaid.includes(o)}
-                  onToggle={() => toggle(wPaid, setWPaid, o)}
-                />
-              ))}
-            </div>
-            <p className="hint">Payment is collected at this desk.</p>
-          </div>
+          <FamilySelector
+            maritalStatus={wMarital}
+            family={wFam}
+            onFamilyChange={setWFam}
+            paid={wPaid}
+            onPaidChange={setWPaid}
+          />
           <div className="tally">
             <div>
               <small>Total wristbands, including you</small>
               <b>{1 + wFam.length + wPaid.length}</b>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <small>Pay at desk</small>
-              <b style={{ fontSize: 24 }}>{formatINR(amountToCollect(wPaid))}</b>
             </div>
           </div>
           <div className="actions">
@@ -618,13 +553,11 @@ export default function KioskPage() {
 
 function Pills({ emp }: { emp: EmployeeFull }) {
   const wb = wristbandTotal(emp.family_members, emp.paid_extended);
-  const pay = amountToCollect(emp.paid_extended);
   return (
     <div className="pills">
       <span className="pill">
         {wb} wristband{wb > 1 ? "s" : ""}
       </span>
-      {pay > 0 && <span className="pill gold">{formatINR(pay)} to pay at desk</span>}
     </div>
   );
 }

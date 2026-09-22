@@ -431,6 +431,37 @@ ul.results button:focus-visible {
   display: inline-block;
   flex: none;
 }
+
+/* count dropdown (Children / Siblings / Others) */
+.countsel {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 99px;
+  padding: 6px 8px 6px 18px;
+  min-height: 48px;
+  background: #fff;
+  font-weight: 600;
+  font-size: 15.5px;
+  color: var(--ink);
+}
+.countsel select {
+  height: 36px;
+  min-width: 64px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 15px var(--body);
+  padding: 0 10px;
+  cursor: pointer;
+}
+.countsel select:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(168, 137, 68, 0.2);
+}
 .chip[aria-pressed="true"] .tick {
   background: var(--gold);
   border-color: var(--gold);
