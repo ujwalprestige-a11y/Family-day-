@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 import { PRICE_PER_PAID } from "./wristbands";
 
 // Minimal shape needed to render the confirmation email.
@@ -18,7 +19,7 @@ const MAIL_FROM = process.env.MAIL_FROM || "amar.v@prestigeconstructions.com";
  * Build an SMTP transport from env vars. Returns null when SMTP isn't
  * configured, so registration still works without email set up.
  */
-function buildTransport(): nodemailer.Transporter | null {
+function buildTransport(): Transporter | null {
   const host = process.env.SMTP_HOST;
   if (!host) return null;
   return nodemailer.createTransport({
