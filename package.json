@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "import": "tsx scripts/import-master.ts",
+    "gen:sql": "tsx scripts/gen-supabase-sql.ts",
     "db:local": "tsx scripts/local-db.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
