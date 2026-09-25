@@ -3,21 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
-import { formatINR } from "@/lib/wristbands";
 import type { AdminRow, AdminTiles, Status } from "@/lib/types";
 
-type Filter = "registered" | "pre_registered" | "walk_in" | "not_registered" | "all";
+type Filter = "checked_in" | "not_arrived" | "walk_in" | "over" | "review" | "all";
 
 const TABS: { key: Filter; label: string }[] = [
-  { key: "registered", label: "Registered" },
-  { key: "pre_registered", label: "Pre-registered" },
+  { key: "checked_in", label: "Checked in" },
+  { key: "not_arrived", label: "Not yet arrived" },
   { key: "walk_in", label: "Walk-ins" },
-  { key: "not_registered", label: "Not yet arrived" },
+  { key: "over", label: "Over allotment" },
+  { key: "review", label: "Needs review" },
   { key: "all", label: "All" },
 ];
 
 function statusLabel(s: Status): string {
-  return s === "pre_registered" ? "Pre-registered" : s === "walk_in" ? "Walk-in" : "Not yet arrived";
+  return s === "checked_in" ? "Checked in" : "Not yet arrived";
 }
 
 function timeLabel(iso: string | null): string {
@@ -25,6 +25,10 @@ function timeLabel(iso: string | null): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "-";
   return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function isOver(r: AdminRow): boolean {
+  return r.actual_adults > r.allotted_adults || r.actual_children > r.allotted_children;
 }
 
 export default function AdminPage() {
@@ -40,7 +44,7 @@ export default function AdminPage() {
   // dashboard
   const [tiles, setTiles] = useState<AdminTiles | null>(null);
   const [rows, setRows] = useState<AdminRow[]>([]);
-  const [filter, setFilter] = useState<Filter>("registered");
+  const [filter, setFilter] = useState<Filter>("checked_in");
   const [text, setText] = useState("");
   const [xlsMsg, setXlsMsg] = useState<{ text: string; bad?: boolean }>({ text: "" });
 
@@ -116,10 +120,19 @@ export default function AdminPage() {
   /* ------------------------- filtering ------------------------- */
   const q = text.trim().toLowerCase();
   const visible = rows.filter((r) => {
-    if (filter === "registered" && r.status === "not_registered") return false;
-    if (filter !== "registered" && filter !== "all" && r.status !== filter) return false;
+    if (filter === "checked_in" && r.status !== "checked_in") return false;
+    if (filter === "not_arrived" && r.status !== "not_arrived") return false;
+    if (filter === "walk_in" && r.source !== "walk_in") return false;
+    if (filter === "over" && !isOver(r)) return false;
+    if (filter === "review" && !r.needs_review) return false;
+
     if (!q) return true;
-    return r.employee_id.toLowerCase().startsWith(q) || r.full_name.toLowerCase().includes(q);
+    return (
+      r.employee_id.toLowerCase().startsWith(q) ||
+      r.full_name.toLowerCase().includes(q) ||
+      r.entity.toLowerCase().includes(q) ||
+      r.department.toLowerCase().includes(q)
+    );
   });
 
   /* ------------------------- render ------------------------- */
@@ -186,7 +199,7 @@ export default function AdminPage() {
         <div className="card">
           <div className="admin-top">
             <div>
-              <h2>Admin: registrations</h2>
+              <h2>Admin: check-ins</h2>
               <p className="sub" style={{ margin: 0 }}>
                 Live counts and the full list. Export to Excel any time.
               </p>
@@ -211,32 +224,42 @@ export default function AdminPage() {
               <span>In master list</span>
             </div>
             <div className="stat hl">
-              <b>{tiles?.pre_registered ?? 0}</b>
-              <span>Pre-registered</span>
-            </div>
-            <div className="stat hl">
-              <b>{tiles?.walk_ins ?? 0}</b>
-              <span>Walk-ins</span>
+              <b>{tiles?.checked_in ?? 0}</b>
+              <span>Checked in</span>
             </div>
             <div className="stat">
               <b>{tiles?.not_yet_arrived ?? 0}</b>
               <span>Not yet arrived</span>
             </div>
-            <div className="stat">
-              <b>{tiles?.wristbands_issued ?? 0}</b>
-              <span>Wristbands issued</span>
+            <div className="stat hl">
+              <b>{tiles?.walk_ins ?? 0}</b>
+              <span>Walk-ins added</span>
             </div>
             <div className="stat">
-              <b>{formatINR(tiles?.amount_to_collect ?? 0)}</b>
-              <span>Paid extended, to collect</span>
+              <b>{tiles?.allotted_total ?? 0}</b>
+              <span>
+                Allotted ({tiles?.allotted_adults ?? 0} adults + {tiles?.allotted_children ?? 0}{" "}
+                children)
+              </span>
+            </div>
+            <div className="stat hl">
+              <b>{tiles?.actual_total ?? 0}</b>
+              <span>
+                Issued ({tiles?.actual_adults ?? 0} adults + {tiles?.actual_children ?? 0}{" "}
+                children)
+              </span>
+            </div>
+            <div className="stat">
+              <b>{tiles?.over_allotment ?? 0}</b>
+              <span>Over their allotment</span>
             </div>
           </div>
 
           <div className="toolbar">
             <input
               type="text"
-              placeholder="Filter by ID or name"
-              aria-label="Filter by ID or name"
+              placeholder="Filter by ID, name, entity or department"
+              aria-label="Filter by ID, name, entity or department"
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
@@ -260,15 +283,15 @@ export default function AdminPage() {
                 <tr>
                   <th>Employee ID</th>
                   <th>Name</th>
-                  <th>Email</th>
-                  <th>Mobile</th>
-                  <th>Marital</th>
-                  <th>Family</th>
-                  <th>Paid extended</th>
-                  <th className="num">Wristbands</th>
+                  <th>Entity</th>
+                  <th>Department</th>
+                  <th className="num">Allot. A</th>
+                  <th className="num">Allot. C</th>
+                  <th className="num">Issued A</th>
+                  <th className="num">Issued C</th>
+                  <th className="num">Diff</th>
                   <th>Status</th>
                   <th>Time</th>
-                  <th>Edited</th>
                 </tr>
               </thead>
               <tbody>
@@ -279,37 +302,59 @@ export default function AdminPage() {
                     </td>
                   </tr>
                 ) : (
-                  visible.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.employee_id}</td>
-                      <td>
-                        {r.full_name}
-                        {r.needs_review && (
-                          <span className="review-flag" title="Needs review">
-                            {" "}
-                            ⚠
-                          </span>
-                        )}
-                      </td>
-                      <td>{r.email}</td>
-                      <td>{r.mobile}</td>
-                      <td>{r.marital_status}</td>
-                      <td>{r.family_members.join(", ") || "-"}</td>
-                      <td>{r.paid_extended.join(", ") || "-"}</td>
-                      <td className="num">{r.wristbands_total}</td>
-                      <td>
-                        <span className={`st ${r.status}`}>{statusLabel(r.status)}</span>
-                      </td>
-                      <td>{timeLabel(r.registered_at)}</td>
-                      <td>{r.edited_fields.join(", ") || "-"}</td>
-                    </tr>
-                  ))
+                  visible.map((r) => {
+                    const allotted = r.allotted_adults + r.allotted_children;
+                    const actual = r.actual_adults + r.actual_children;
+                    const diff = actual - allotted;
+                    return (
+                      <tr key={r.id}>
+                        <td>{r.employee_id}</td>
+                        <td>
+                          {r.full_name}
+                          {r.needs_review && (
+                            <span className="review-flag" title="Needs review">
+                              {" "}
+                              ⚠
+                            </span>
+                          )}
+                        </td>
+                        <td>{r.entity || "-"}</td>
+                        <td>{r.department || "-"}</td>
+                        <td className="num">{r.allotted_adults}</td>
+                        <td className="num">{r.allotted_children}</td>
+                        <td className="num">{r.status === "checked_in" ? r.actual_adults : "-"}</td>
+                        <td className="num">
+                          {r.status === "checked_in" ? r.actual_children : "-"}
+                        </td>
+                        <td className="num">
+                          {r.status === "checked_in" ? (diff > 0 ? `+${diff}` : diff) : "-"}
+                        </td>
+                        <td>
+                          <span className={`st ${r.status}`}>{statusLabel(r.status)}</span>
+                          {r.source === "walk_in" && (
+                            <>
+                              {" "}
+                              <span className="st walk_in">Walk-in</span>
+                            </>
+                          )}
+                          {r.status === "checked_in" && isOver(r) && (
+                            <>
+                              {" "}
+                              <span className="st over">Over</span>
+                            </>
+                          )}
+                        </td>
+                        <td>{timeLabel(r.registered_at)}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
           <p className="note">
-            The Excel file has three sheets: Registrations, Not yet arrived, and Summary.
+            Showing {visible.length} of {rows.length} records. The Excel file has three sheets:
+            Checked in, Not yet arrived, and Summary.
           </p>
         </div>
       </section>

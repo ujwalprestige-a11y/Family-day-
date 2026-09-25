@@ -3,10 +3,9 @@ import { prisma } from "@/lib/db";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
-// Public search: min 2 chars, prefix on ID or contains on name, max 8 results,
-// masked mobile only. Rate-limited per client IP.
+// Public search by employee ID prefix or name substring. Returns the allotment
+// so staff can see the adult/children split straight from the results list.
 export async function GET(req: NextRequest) {
   // Generous per-IP limit: a venue may have ~70 devices behind one public IP,
   // each firing debounced searches. This guards against abuse without blocking
@@ -21,14 +20,14 @@ export async function GET(req: NextRequest) {
   }
 
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
-  // Only search once the guest has typed at least 4 characters.
-  if (q.length < 4) {
+  // Only search once the guest has typed at least 3 characters.
+  if (q.length < 3) {
     return NextResponse.json({ results: [] });
   }
 
   // Match on employee ID prefix OR name (case-insensitive). No result cap — all
   // matches are returned so nothing is dropped.
-  const rows = await prisma.employee.findMany({
+  const results = await prisma.employee.findMany({
     where: {
       OR: [
         { employee_id: { startsWith: q } },
@@ -40,20 +39,13 @@ export async function GET(req: NextRequest) {
       id: true,
       employee_id: true,
       full_name: true,
-      marital_status: true,
-      mobile: true,
+      entity: true,
+      department: true,
+      allotted_adults: true,
+      allotted_children: true,
       status: true,
     },
   });
-
-  const results = rows.map((r) => ({
-    id: r.id,
-    employee_id: r.employee_id,
-    full_name: r.full_name,
-    marital_status: r.marital_status,
-    mobile: r.mobile,
-    status: r.status,
-  }));
 
   return NextResponse.json({ results });
 }

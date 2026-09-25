@@ -1,41 +1,47 @@
-export type Status = "not_registered" | "pre_registered" | "walk_in";
+export type Status = "not_arrived" | "checked_in";
 export type Source = "master" | "walk_in";
 
+/** Trimmed shape returned by /api/search — enough to pick the right person. */
 export interface SearchResult {
   id: string;
   employee_id: string;
   full_name: string;
-  marital_status: string;
-  mobile: string;
+  entity: string;
+  department: string;
+  allotted_adults: number;
+  allotted_children: number;
   status: Status;
 }
 
+/** Full record returned by /api/employee/:id and the register/walk-in routes. */
 export interface EmployeeFull {
   id: string;
   employee_id: string;
   full_name: string;
-  email: string;
-  mobile: string;
-  marital_status: string;
-  family_members: string[];
-  paid_extended: string[];
-  wristbands_total: number;
+  entity: string;
+  department: string;
+  allotted_adults: number;
+  allotted_children: number;
+  actual_adults: number;
+  actual_children: number;
   status: Status;
   source: Source;
-  edited_fields: unknown;
   registered_at: string | null;
   needs_review: boolean;
 }
 
-export interface AdminRow extends EmployeeFull {
-  edited_fields: string[];
-}
+export type AdminRow = EmployeeFull;
 
 export interface AdminTiles {
   in_master: number;
-  pre_registered: number;
-  walk_ins: number;
+  checked_in: number;
   not_yet_arrived: number;
-  wristbands_issued: number;
-  amount_to_collect: number;
+  walk_ins: number;
+  allotted_adults: number;
+  allotted_children: number;
+  allotted_total: number;
+  actual_adults: number;
+  actual_children: number;
+  actual_total: number;
+  over_allotment: number;
 }

@@ -1,6 +1,13 @@
 // Prestige Family Day 2026 – Registration Desk
-// One row per CSV submission (no de-duplication): employee_id is NOT unique,
-// so the same person can appear multiple times and staff pick the right entry.
+//
+// The master list is an ALLOTMENT register imported from "Updated List.xlsx":
+// each employee is allotted a number of adult and child wristbands. At the desk
+// we record how many actually turned up (actual_*), which may differ from the
+// allotment in either direction.
+//
+// employee_id is indexed but NOT unique: the sheet is deduplicated today, but a
+// walk-in could legitimately collide, and staff should see rather than lose rows.
+//
 // Postgres everywhere (local embedded Postgres in dev, Supabase in prod).
 
 datasource db {
@@ -13,39 +20,48 @@ generator client {
   provider = "prisma-client-js"
 }
 
+/// Whether the employee has turned up at the desk yet.
 enum Status {
-  not_registered
-  pre_registered
-  walk_in
+  not_arrived
+  checked_in
 }
 
+/// Where the row came from: the imported master list, or created at the desk.
 enum Source {
   master
   walk_in
 }
 
 model Employee {
-  id               String    @id @default(cuid())
-  // The Microsoft Forms response "Id" — unique per submission, used to make
-  // re-imports idempotent. Null for walk-ins created at the desk.
-  form_id          String?   @unique
+  id          String @id @default(cuid())
+  employee_id String
+  full_name   String
 
-  employee_id      String
-  full_name        String
-  email            String
-  mobile           String
-  marital_status   String
-  family_members   String[]
-  paid_extended    String[]
-  wristbands_total Int       @default(1)
-  status           Status    @default(not_registered)
-  source           Source    @default(master)
-  edited_fields    Json      @default("[]")
-  registered_at    DateTime?
-  needs_review     Boolean   @default(false)
+  /// Org context from the sheet. Helps staff pick the right person when two
+  /// people share a name, and groups the Excel export.
+  entity     String @default("")
+  department String @default("")
 
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  /// Allotment from the sheet. `allotted_adults` INCLUDES the employee
+  /// themselves (the sheet's ADULT column is never below 1), so the total
+  /// wristbands allotted is allotted_adults + allotted_children.
+  allotted_adults   Int @default(0)
+  allotted_children Int @default(0)
+
+  /// Actually issued at the desk. Zero until they check in.
+  actual_adults   Int @default(0)
+  actual_children Int @default(0)
+
+  status        Status    @default(not_arrived)
+  source        Source    @default(master)
+  registered_at DateTime?
+
+  /// Set by the importer for rows staff should eyeball, e.g. an employee_id
+  /// that is not six digits ("Intern", "F and F", "C10504").
+  needs_review Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   @@index([employee_id])
   @@index([full_name])

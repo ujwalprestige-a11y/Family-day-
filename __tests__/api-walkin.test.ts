@@ -11,76 +11,107 @@ function req(body: unknown) {
   });
 }
 
+const valid = {
+  employee_id: "700000",
+  full_name: "Walk In",
+  entity: "Morph",
+  department: "Morph",
+  actual_adults: 2,
+  actual_children: 1,
+};
+
 beforeEach(async () => {
   await prisma.employee.deleteMany();
 });
 
 describe("POST /api/walkin", () => {
-  it("returns 422 when required fields are missing/invalid", async () => {
-    const res = await walkin(req({ employee_id: "", full_name: "", email: "bad", mobile: "12" }));
+  it("creates a checked-in walk-in with no allotment", async () => {
+    const res = await walkin(req(valid));
+    expect(res.status).toBe(201);
+
+    const { result, employee } = await res.json();
+    expect(result).toBe("walkin");
+    expect(employee.status).toBe("checked_in");
+    expect(employee.source).toBe("walk_in");
+    expect(employee.entity).toBe("Morph");
+    expect(employee.department).toBe("Morph");
+    expect(employee.actual_adults).toBe(2);
+    expect(employee.actual_children).toBe(1);
+    // No allotment was planned for this person.
+    expect(employee.allotted_adults).toBe(0);
+    expect(employee.allotted_children).toBe(0);
+    expect(employee.registered_at).toBeTruthy();
+  });
+
+  it("treats entity and department as optional", async () => {
+    const res = await walkin(
+      req({ employee_id: "700001", full_name: "No Org", actual_adults: 1, actual_children: 0 })
+    );
+    expect(res.status).toBe(201);
+    const { employee } = await res.json();
+    expect(employee.entity).toBe("");
+    expect(employee.department).toBe("");
+  });
+
+  it("rejects an employee_id that is not exactly 6 digits (422)", async () => {
+    const short = await walkin(req({ ...valid, employee_id: "700" }));
+    expect(short.status).toBe(422);
+    expect((await short.json()).errors.employee_id).toBeTruthy();
+
+    const long = await walkin(req({ ...valid, employee_id: "1234567" }));
+    expect(long.status).toBe(422);
+  });
+
+  it("rejects a missing employee_id and a blank name (422)", async () => {
+    const res = await walkin(req({ ...valid, employee_id: "", full_name: "  " }));
     expect(res.status).toBe(422);
     const { errors } = await res.json();
     expect(errors.employee_id).toBeTruthy();
     expect(errors.full_name).toBeTruthy();
-    expect(errors.email).toBeTruthy();
-    expect(errors.mobile).toBeTruthy();
   });
 
-  it("creates a walk-in with free family and paid extended, computing wristbands", async () => {
-    const res = await walkin(
-      req({
-        employee_id: "888001",
-        full_name: "Walk In",
-        email: "w@i.com",
-        mobile: "9876543210",
-        marital_status: "Single",
-        family_members: ["Parent 1", "Parent 2"],
-        paid_extended: ["Sibling 1"],
-      })
-    );
-    expect(res.status).toBe(201);
-    const { result, employee } = await res.json();
-    expect(result).toBe("walkin");
-    expect(employee.status).toBe("walk_in");
-    expect(employee.source).toBe("walk_in");
-    expect(employee.wristbands_total).toBe(4); // 1 self + 2 family + 1 paid
-    expect(employee.paid_extended).toEqual(["Sibling 1"]);
+  it("rejects issuing zero wristbands (422)", async () => {
+    const res = await walkin(req({ ...valid, actual_adults: 0, actual_children: 0 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).errors.actual_adults).toBeTruthy();
   });
 
-  it("rejects an employee_id that is not exactly 6 digits (422)", async () => {
-    const short = await walkin(
-      req({ employee_id: "700", full_name: "Nope", email: "n@x.com", mobile: "9876543210" })
-    );
-    expect(short.status).toBe(422);
-    expect((await short.json()).errors.employee_id).toBeTruthy();
-
-    const long = await walkin(
-      req({ employee_id: "1234567", full_name: "Nope", email: "n@x.com", mobile: "9876543210" })
-    );
-    expect(long.status).toBe(422);
-    expect((await long.json()).errors.employee_id).toBeTruthy();
+  it("returns 400 for a malformed body", async () => {
+    const bad = new NextRequest("http://localhost/api/walkin", {
+      method: "POST",
+      body: "{not json",
+      headers: { "content-type": "application/json" },
+    });
+    expect((await walkin(bad)).status).toBe(400);
   });
 
-  it("rejects an employee_id that already exists (409)", async () => {
+  it("rejects an employee_id already present in the list (409)", async () => {
     await prisma.employee.create({
       data: {
         employee_id: "700000",
-        full_name: "Existing",
-        email: "e@x.com",
-        mobile: "9000000000",
-        marital_status: "Single",
-        family_members: [],
-        paid_extended: [],
-        wristbands_total: 1,
-        status: "not_registered",
+        full_name: "Already Here",
+        allotted_adults: 1,
+        allotted_children: 0,
+        status: "not_arrived",
         source: "master",
       },
     });
-    const res = await walkin(
-      req({ employee_id: "700000", full_name: "Dup", email: "d@d.com", mobile: "9876543210" })
-    );
+
+    const res = await walkin(req(valid));
     expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toBe("exists");
+    const { error, message } = await res.json();
+    expect(error).toBe("exists");
+    expect(message).toBeTruthy();
+
+    // Nothing extra was created.
+    expect(await prisma.employee.count({ where: { employee_id: "700000" } })).toBe(1);
+  });
+
+  it("clamps out-of-range counts", async () => {
+    const res = await walkin(req({ ...valid, actual_adults: 9999, actual_children: 2.9 }));
+    expect(res.status).toBe(201);
+    const { employee } = await res.json();
+    expect(employee.actual_adults).toBe(20);
+    expect(employee.actual_children).toBe(2);
   });
 });

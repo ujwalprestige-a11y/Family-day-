@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { POST as register } from "@/app/api/register/[id]/route";
+import { POST as checkIn } from "@/app/api/register/[id]/route";
 import { prisma } from "@/lib/db";
 
 function req(id: string, body: unknown) {
@@ -17,16 +17,13 @@ let recId: string;
 async function seed(): Promise<string> {
   const rec = await prisma.employee.create({
     data: {
-      form_id: "seed-1",
-      employee_id: "500",
-      full_name: "Old Name",
-      email: "old@x.com",
-      mobile: "9000000000",
-      marital_status: "Married",
-      family_members: ["Spouse"],
-      paid_extended: [],
-      wristbands_total: 2,
-      status: "not_registered",
+      employee_id: "220477",
+      full_name: "Umesh G K",
+      entity: "PPMS Bangalore",
+      department: "PPMS",
+      allotted_adults: 3,
+      allotted_children: 2,
+      status: "not_arrived",
       source: "master",
     },
   });
@@ -40,62 +37,100 @@ beforeEach(async () => {
 
 describe("POST /api/register/:id", () => {
   it("returns 404 for an unknown id", async () => {
-    const res = await register(
-      req("nonexistent", { full_name: "X", email: "x@y.com", mobile: "9876543210" }),
+    const res = await checkIn(
+      req("nonexistent", { actual_adults: 1, actual_children: 0 }),
       ctx("nonexistent")
     );
     expect(res.status).toBe(404);
   });
 
-  it("returns 422 for invalid payload", async () => {
-    const res = await register(req(recId, { full_name: "", email: "bad", mobile: "123" }), ctx(recId));
+  it("returns 400 for a malformed body", async () => {
+    const bad = new NextRequest(`http://localhost/api/register/${recId}`, {
+      method: "POST",
+      body: "{not json",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await checkIn(bad, ctx(recId));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 422 when a count is missing", async () => {
+    const res = await checkIn(req(recId, { actual_adults: 2 }), ctx(recId));
     expect(res.status).toBe(422);
     const { errors } = await res.json();
-    expect(errors.full_name).toBeTruthy();
-    expect(errors.email).toBeTruthy();
-    expect(errors.mobile).toBeTruthy();
+    expect(errors.actual_children).toBeTruthy();
   });
 
-  it("registers, records only the changed fields, and sets pre_registered", async () => {
-    const res = await register(
-      req(recId, {
-        full_name: "New Name", // changed
-        email: "old@x.com", // unchanged
-        mobile: "9000000000", // unchanged
-        family_members: ["Spouse", "Child 1"], // changed
-        paid_extended: ["Parent 1"], // changed
-      }),
+  it("returns 422 when nothing would be issued", async () => {
+    const res = await checkIn(req(recId, { actual_adults: 0, actual_children: 0 }), ctx(recId));
+    expect(res.status).toBe(422);
+  });
+
+  it("checks in, stores the actuals and stamps the time", async () => {
+    const res = await checkIn(req(recId, { actual_adults: 3, actual_children: 2 }), ctx(recId));
+    expect(res.status).toBe(200);
+
+    const { result, employee, over_allotment } = await res.json();
+    expect(result).toBe("checked_in");
+    expect(employee.status).toBe("checked_in");
+    expect(employee.actual_adults).toBe(3);
+    expect(employee.actual_children).toBe(2);
+    expect(employee.registered_at).toBeTruthy();
+    expect(over_allotment).toBe(false);
+
+    // Allotment is untouched by a check-in.
+    expect(employee.allotted_adults).toBe(3);
+    expect(employee.allotted_children).toBe(2);
+  });
+
+  it("allows fewer than allotted", async () => {
+    const res = await checkIn(req(recId, { actual_adults: 1, actual_children: 0 }), ctx(recId));
+    const { over_allotment, employee } = await res.json();
+    expect(employee.actual_adults).toBe(1);
+    expect(over_allotment).toBe(false);
+  });
+
+  it("reports over_allotment when issuing more than allotted", async () => {
+    const res = await checkIn(req(recId, { actual_adults: 4, actual_children: 2 }), ctx(recId));
+    const { over_allotment } = await res.json();
+    expect(over_allotment).toBe(true);
+  });
+
+  it("clamps out-of-range and junk counts instead of failing", async () => {
+    const res = await checkIn(
+      req(recId, { actual_adults: 9999, actual_children: -5 }),
       ctx(recId)
     );
     expect(res.status).toBe(200);
-    const { result, employee } = await res.json();
-    expect(result).toBe("registered");
-    expect(employee.status).toBe("pre_registered");
-    expect(employee.registered_at).toBeTruthy();
-    expect(employee.wristbands_total).toBe(4); // 1 + 2 family + 1 paid
-    expect(new Set(employee.edited_fields)).toEqual(
-      new Set(["full_name", "family_members", "paid_extended"])
-    );
+    const { employee } = await res.json();
+    expect(employee.actual_adults).toBe(20); // MAX_ADULTS
+    expect(employee.actual_children).toBe(0);
   });
 
-  it("is idempotent: a second confirm returns already_registered and does not change data", async () => {
-    await register(
-      req(recId, { full_name: "First", email: "old@x.com", mobile: "9000000000", family_members: ["Spouse"], paid_extended: [] }),
-      ctx(recId)
-    );
+  it("is re-runnable: a correction updates the counts and keeps the first arrival time", async () => {
+    const first = await checkIn(req(recId, { actual_adults: 3, actual_children: 2 }), ctx(recId));
+    const { employee: firstEmp } = await first.json();
+    const firstTime = firstEmp.registered_at;
+
+    const second = await checkIn(req(recId, { actual_adults: 2, actual_children: 1 }), ctx(recId));
+    expect(second.status).toBe(200);
+    const { result, employee } = await second.json();
+
+    expect(result).toBe("updated");
+    expect(employee.actual_adults).toBe(2);
+    expect(employee.actual_children).toBe(1);
+    expect(employee.registered_at).toBe(firstTime);
+  });
+
+  it("is safe against a double tap: same counts twice leaves the same data", async () => {
+    await checkIn(req(recId, { actual_adults: 3, actual_children: 2 }), ctx(recId));
     const before = await prisma.employee.findUnique({ where: { id: recId } });
 
-    const res = await register(
-      req(recId, { full_name: "Second Attempt", email: "new@x.com", mobile: "9111111111", family_members: [], paid_extended: ["Parent 1", "Parent 2"] }),
-      ctx(recId)
-    );
-    expect(res.status).toBe(200);
-    const { result } = await res.json();
-    expect(result).toBe("already_registered");
-
+    await checkIn(req(recId, { actual_adults: 3, actual_children: 2 }), ctx(recId));
     const after = await prisma.employee.findUnique({ where: { id: recId } });
-    expect(after?.full_name).toBe(before?.full_name);
-    expect(after?.email).toBe(before?.email);
-    expect(after?.wristbands_total).toBe(before?.wristbands_total);
+
+    expect(after?.actual_adults).toBe(before?.actual_adults);
+    expect(after?.actual_children).toBe(before?.actual_children);
+    expect(after?.registered_at?.toISOString()).toBe(before?.registered_at?.toISOString());
   });
 });

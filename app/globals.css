@@ -739,17 +739,23 @@ td.num {
   padding: 2px 10px;
   border-radius: 99px;
 }
-.st.pre_registered {
+.st.checked_in {
   background: rgba(46, 125, 79, 0.12);
   color: var(--ok);
 }
+.st.not_arrived {
+  background: #f0ece3;
+  color: var(--ink-2);
+}
+/* Source badge, shown beside the status for desk-added guests. */
 .st.walk_in {
   background: var(--soft-gold);
   color: var(--gold-ink);
 }
-.st.not_registered {
-  background: #f0ece3;
-  color: var(--ink-2);
+/* Actual count exceeded the allotment. */
+.st.over {
+  background: rgba(179, 38, 30, 0.1);
+  color: var(--danger);
 }
 .note {
   color: var(--ink-2);
@@ -907,4 +913,121 @@ td.num {
     animation: none;
     border-top-color: var(--gold);
   }
+}
+
+/* ---------------------------- allotment counter ----------------------- */
+.allotgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 560px) {
+  .allotgrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stepper {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--paper);
+}
+.stepper.over {
+  border-color: var(--gold);
+  background: var(--soft-gold);
+}
+.stepper-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.stepper-label {
+  font-weight: 700;
+  font-size: 15.5px;
+  color: var(--ink);
+}
+.stepper-allot {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.stepper-allot b {
+  color: var(--gold-ink);
+}
+.stepper-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stepper-controls button {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid var(--gold);
+  background: #fff;
+  color: var(--ink);
+  font: 700 24px/1 var(--body);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+}
+.stepper-controls button:hover:not(:disabled) {
+  background: var(--soft-gold);
+}
+.stepper-controls button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.stepper-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  border-color: var(--line-2);
+}
+.stepper-controls button:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+.stepper-value {
+  flex: 1 1 auto;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.stepper-hint {
+  display: block;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* Read-only allotment summary on the confirm + welcome screens */
+.allotline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
+  margin-bottom: 18px;
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.allotline b {
+  font-family: var(--display);
+  font-size: 17px;
+  color: var(--gold-ink);
+}
+
+/* Org context under a name (entity · department) */
+.orgline {
+  color: var(--ink-2);
+  font-size: 13.5px;
 }

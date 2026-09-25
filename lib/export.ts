@@ -3,82 +3,95 @@
  * the export tests.
  */
 import ExcelJS from "exceljs";
-import { PRICE_PER_PAID } from "./wristbands";
+import { exceedsAllotment } from "./allotment";
 
 // The subset of Employee fields the export needs.
 export interface ExportEmployee {
   employee_id: string;
   full_name: string;
-  email: string;
-  mobile: string;
-  marital_status: string;
-  family_members: string[];
-  paid_extended: string[];
-  wristbands_total: number;
-  status: "not_registered" | "pre_registered" | "walk_in";
+  entity: string;
+  department: string;
+  allotted_adults: number;
+  allotted_children: number;
+  actual_adults: number;
+  actual_children: number;
+  status: "not_arrived" | "checked_in";
   source: "master" | "walk_in";
-  edited_fields: unknown;
   registered_at: Date | string | null;
+  needs_review: boolean;
 }
 
 const COLUMNS = [
   "Employee ID",
   "Full Name",
-  "Email",
-  "Mobile",
-  "Marital Status",
-  "Family Members",
-  "Paid Extended Family",
-  "Wristbands (incl. self)",
-  "Amount to Collect (INR)",
+  "Entity",
+  "Department",
+  "Allotted Adults",
+  "Allotted Children",
+  "Allotted Total",
+  "Actual Adults",
+  "Actual Children",
+  "Actual Total",
+  "Difference",
+  "Over Allotment",
   "Status",
   "Source",
-  "Registered At",
-  "Fields Edited at Desk",
+  "Checked In At",
+  "Needs Review",
 ];
 
-// Column indexes (1-based) that must be stored as text.
-const TEXT_COLUMNS = [1, 4]; // Employee ID, Mobile
+// Column indexes (1-based) that must be stored as text so Excel does not strip
+// leading zeros or reformat them.
+const TEXT_COLUMNS = [1];
 
 export function statusLabel(status: ExportEmployee["status"]): string {
-  return status === "pre_registered"
-    ? "Pre-registered"
-    : status === "walk_in"
-      ? "Walk-in"
-      : "Not yet arrived";
+  return status === "checked_in" ? "Checked in" : "Not yet arrived";
 }
 
 export function sourceLabel(source: ExportEmployee["source"]): string {
-  return source === "walk_in" ? "Walk-in form" : "Master list";
+  return source === "walk_in" ? "Walk-in (added at desk)" : "Master list";
 }
 
-function editedList(edited: unknown): string {
-  if (Array.isArray(edited)) return edited.join("; ");
-  return "";
-}
-
-function formatRegisteredAt(value: Date | string | null): string {
+function formatCheckedInAt(value: Date | string | null): string {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(value);
   if (isNaN(d.getTime())) return "";
   return d.toLocaleString("en-IN");
 }
 
+export function allottedTotal(e: ExportEmployee): number {
+  return e.allotted_adults + e.allotted_children;
+}
+
+export function actualTotal(e: ExportEmployee): number {
+  return e.actual_adults + e.actual_children;
+}
+
 function rowFor(e: ExportEmployee): (string | number)[] {
+  const allotted = allottedTotal(e);
+  const actual = actualTotal(e);
+  const over = exceedsAllotment(
+    { adults: e.actual_adults, children: e.actual_children },
+    { adults: e.allotted_adults, children: e.allotted_children }
+  );
   return [
     e.employee_id,
     e.full_name,
-    e.email,
-    e.mobile,
-    e.marital_status,
-    e.family_members.join("; "),
-    e.paid_extended.join("; "),
-    e.wristbands_total,
-    e.paid_extended.length * PRICE_PER_PAID,
+    e.entity,
+    e.department,
+    e.allotted_adults,
+    e.allotted_children,
+    allotted,
+    e.actual_adults,
+    e.actual_children,
+    actual,
+    // Only meaningful once they have arrived; blank keeps the column clean.
+    e.status === "checked_in" ? actual - allotted : "",
+    over ? "YES" : "",
     statusLabel(e.status),
     sourceLabel(e.source),
-    formatRegisteredAt(e.registered_at),
-    editedList(e.edited_fields),
+    formatCheckedInAt(e.registered_at),
+    e.needs_review ? "YES" : "",
   ];
 }
 
@@ -92,7 +105,7 @@ function addDataSheet(wb: ExcelJS.Workbook, name: string, rows: ExportEmployee[]
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
 
-  // Store Employee ID and Mobile as text.
+  // Store Employee ID as text.
   for (const col of TEXT_COLUMNS) {
     ws.getColumn(col).numFmt = "@";
     ws.getColumn(col).eachCell((cell) => {
@@ -115,22 +128,42 @@ function addDataSheet(wb: ExcelJS.Workbook, name: string, rows: ExportEmployee[]
 
 export interface SummaryCounts {
   inMaster: number;
-  preRegistered: number;
+  checkedIn: number;
   walkIns: number;
   notYetArrived: number;
-  wristbandsIssued: number;
-  amountToCollect: number;
+  allottedAdults: number;
+  allottedChildren: number;
+  allottedTotal: number;
+  actualAdults: number;
+  actualChildren: number;
+  actualTotal: number;
+  overAllotment: number;
 }
 
 export function computeSummary(all: ExportEmployee[]): SummaryCounts {
-  const registered = all.filter((e) => e.status !== "not_registered");
+  const checkedIn = all.filter((e) => e.status === "checked_in");
   return {
     inMaster: all.filter((e) => e.source === "master").length,
-    preRegistered: all.filter((e) => e.status === "pre_registered").length,
-    walkIns: all.filter((e) => e.status === "walk_in").length,
-    notYetArrived: all.filter((e) => e.source === "master" && e.status === "not_registered").length,
-    wristbandsIssued: registered.reduce((a, e) => a + e.wristbands_total, 0),
-    amountToCollect: registered.reduce((a, e) => a + e.paid_extended.length * PRICE_PER_PAID, 0),
+    checkedIn: checkedIn.length,
+    walkIns: all.filter((e) => e.source === "walk_in").length,
+    notYetArrived: all.filter((e) => e.source === "master" && e.status === "not_arrived").length,
+
+    // Allotment is planned for everyone in the list, arrived or not.
+    allottedAdults: all.reduce((a, e) => a + e.allotted_adults, 0),
+    allottedChildren: all.reduce((a, e) => a + e.allotted_children, 0),
+    allottedTotal: all.reduce((a, e) => a + allottedTotal(e), 0),
+
+    // Actuals only exist for people who checked in.
+    actualAdults: checkedIn.reduce((a, e) => a + e.actual_adults, 0),
+    actualChildren: checkedIn.reduce((a, e) => a + e.actual_children, 0),
+    actualTotal: checkedIn.reduce((a, e) => a + actualTotal(e), 0),
+
+    overAllotment: checkedIn.filter((e) =>
+      exceedsAllotment(
+        { adults: e.actual_adults, children: e.actual_children },
+        { adults: e.allotted_adults, children: e.allotted_children }
+      )
+    ).length,
   };
 }
 
@@ -148,12 +181,10 @@ export async function buildWorkbook(all: ExportEmployee[]): Promise<ExcelJS.Work
   wb.creator = "Prestige Family Day 2026 Registration Desk";
   wb.created = new Date();
 
-  const registrations = all.filter(
-    (e) => e.status === "pre_registered" || e.status === "walk_in"
-  );
-  const notArrived = all.filter((e) => e.status === "not_registered");
+  const checkedIn = all.filter((e) => e.status === "checked_in");
+  const notArrived = all.filter((e) => e.status === "not_arrived");
 
-  addDataSheet(wb, "Registrations", registrations);
+  addDataSheet(wb, "Checked in", checkedIn);
   addDataSheet(wb, "Not yet arrived", notArrived);
 
   // Summary sheet.
@@ -163,11 +194,19 @@ export async function buildWorkbook(all: ExportEmployee[]): Promise<ExcelJS.Work
   summary.addRow(["Exported", new Date().toLocaleString("en-IN")]);
   summary.addRow([]);
   summary.addRow(["In master list", s.inMaster]);
-  summary.addRow(["Pre-registered", s.preRegistered]);
-  summary.addRow(["Walk-ins", s.walkIns]);
+  summary.addRow(["Checked in", s.checkedIn]);
   summary.addRow(["Not yet arrived", s.notYetArrived]);
-  summary.addRow(["Wristbands issued", s.wristbandsIssued]);
-  summary.addRow(["Paid extended to collect (INR)", s.amountToCollect]);
+  summary.addRow(["Walk-ins added at desk", s.walkIns]);
+  summary.addRow([]);
+  summary.addRow(["Allotted adults", s.allottedAdults]);
+  summary.addRow(["Allotted children", s.allottedChildren]);
+  summary.addRow(["Allotted total", s.allottedTotal]);
+  summary.addRow([]);
+  summary.addRow(["Actual adults issued", s.actualAdults]);
+  summary.addRow(["Actual children issued", s.actualChildren]);
+  summary.addRow(["Actual total issued", s.actualTotal]);
+  summary.addRow([]);
+  summary.addRow(["Checked in over their allotment", s.overAllotment]);
   summary.getRow(1).font = { bold: true, size: 14 };
   summary.getColumn(1).width = 34;
   summary.getColumn(2).width = 22;

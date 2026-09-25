@@ -4,7 +4,6 @@ import { requireAdmin } from "@/lib/session";
 import { buildWorkbook, exportFilename, type ExportEmployee } from "@/lib/export";
 
 export const dynamic = "force-dynamic";
-export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // GET /api/admin/export.xlsx — three-sheet workbook download. Session required.
 export async function GET(req: NextRequest) {
@@ -13,22 +12,22 @@ export async function GET(req: NextRequest) {
   }
 
   const employees = await prisma.employee.findMany({
-    orderBy: [{ status: "asc" }, { full_name: "asc" }],
+    orderBy: [{ status: "asc" }, { entity: "asc" }, { full_name: "asc" }],
   });
 
   const asExport: ExportEmployee[] = employees.map((e) => ({
     employee_id: e.employee_id,
     full_name: e.full_name,
-    email: e.email,
-    mobile: e.mobile,
-    marital_status: e.marital_status,
-    family_members: e.family_members,
-    paid_extended: e.paid_extended,
-    wristbands_total: e.wristbands_total,
+    entity: e.entity,
+    department: e.department,
+    allotted_adults: e.allotted_adults,
+    allotted_children: e.allotted_children,
+    actual_adults: e.actual_adults,
+    actual_children: e.actual_children,
     status: e.status,
     source: e.source,
-    edited_fields: e.edited_fields,
     registered_at: e.registered_at,
+    needs_review: e.needs_review,
   }));
 
   const wb = await buildWorkbook(asExport);
