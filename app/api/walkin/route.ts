@@ -1,25 +1,26 @@
-import { NextRequest, NextResponse, after } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Status, Source } from "@prisma/client";
-import { isValidEmail, isValidMobile, isNonEmptyName, isValidEmployeeId, normaliseMobile } from "@/lib/validation";
-import { wristbandTotal } from "@/lib/wristbands";
-import { sendConfirmationEmail } from "@/lib/email";
+import { isNonEmptyName, isValidEmployeeId } from "@/lib/validation";
+import { MAX_ADULTS, MAX_CHILDREN, clampCount } from "@/lib/allotment";
 
 export const dynamic = "force-dynamic";
-export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 interface WalkinBody {
   employee_id?: string;
   full_name?: string;
-  email?: string;
-  mobile?: string;
-  marital_status?: string;
-  family_members?: string[];
-  paid_extended?: string[];
+  entity?: string;
+  department?: string;
+  actual_adults?: unknown;
+  actual_children?: unknown;
 }
 
-// POST /api/walkin — create a walk-in record. Rejects an employee_id that
-// already exists (guest should search instead).
+/**
+ * POST /api/walkin — add someone who is not in the master list and check them
+ * in immediately. They have no allotment (allotted_* stays 0), so every
+ * wristband issued shows as over-allotment in the export, which is the point:
+ * these are the extras the organisers did not plan for.
+ */
 export async function POST(req: NextRequest) {
   let body: WalkinBody;
   try {
@@ -30,19 +31,21 @@ export async function POST(req: NextRequest) {
 
   const employee_id = (body.employee_id ?? "").trim();
   const full_name = (body.full_name ?? "").trim();
-  const email = (body.email ?? "").trim();
-  const mobileRaw = (body.mobile ?? "").trim();
-  const mobile = normaliseMobile(mobileRaw);
-  const marital_status = (body.marital_status ?? "").trim();
-  const family_members = Array.isArray(body.family_members) ? body.family_members : [];
-  const paid_extended = Array.isArray(body.paid_extended) ? body.paid_extended : [];
+  const entity = (body.entity ?? "").trim();
+  const department = (body.department ?? "").trim();
 
   const errors: Record<string, string> = {};
-  if (!employee_id) errors.employee_id = "Enter your employee ID.";
-  else if (!isValidEmployeeId(employee_id)) errors.employee_id = "Employee ID must be exactly 6 digits.";
-  if (!isNonEmptyName(full_name)) errors.full_name = "Enter your full name.";
-  if (!isValidEmail(email)) errors.email = "Enter a valid email, like name@company.com.";
-  if (!isValidMobile(mobileRaw)) errors.mobile = "Enter a 10-digit mobile number.";
+  if (!employee_id) errors.employee_id = "Enter the employee ID.";
+  else if (!isValidEmployeeId(employee_id))
+    errors.employee_id = "Employee ID must be exactly 6 digits.";
+  if (!isNonEmptyName(full_name)) errors.full_name = "Enter the full name.";
+
+  const actual_adults = clampCount(body.actual_adults, MAX_ADULTS);
+  const actual_children = clampCount(body.actual_children, MAX_CHILDREN);
+  if (actual_adults + actual_children === 0) {
+    errors.actual_adults = "At least one wristband must be issued.";
+  }
+
   if (Object.keys(errors).length > 0) {
     return NextResponse.json({ errors }, { status: 422 });
   }
@@ -62,33 +65,18 @@ export async function POST(req: NextRequest) {
     data: {
       employee_id,
       full_name,
-      email,
-      mobile,
-      marital_status,
-      family_members,
-      paid_extended,
-      wristbands_total: wristbandTotal(family_members, paid_extended),
-      status: Status.walk_in,
+      entity,
+      department,
+      allotted_adults: 0,
+      allotted_children: 0,
+      actual_adults,
+      actual_children,
+      status: Status.checked_in,
       source: Source.walk_in,
       registered_at: new Date(),
       needs_review: false,
-      edited_fields: [],
     },
   });
-
-  // Send the confirmation email after the response is sent (non-blocking).
-  // Guarded so non-request contexts (e.g. unit tests) don't fail.
-  try {
-    after(async () => {
-      try {
-        await sendConfirmationEmail(employee);
-      } catch (err) {
-        console.error("[email] Failed to send confirmation (walkin):", err);
-      }
-    });
-  } catch {
-    /* `after` unavailable outside a request scope */
-  }
 
   return NextResponse.json({ result: "walkin", employee }, { status: 201 });
 }

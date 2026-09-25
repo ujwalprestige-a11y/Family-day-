@@ -9,7 +9,6 @@ import {
 import { rateLimit, resetRateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // POST /api/login { username, password } — checks the static credentials and
 // sets the httpOnly app-gate cookie. Rate-limited per IP; success clears the

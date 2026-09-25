@@ -1,217 +1,234 @@
 /**
- * CSV → canonical record mapping for the Microsoft Forms export.
+ * Maps rows of the master allotment spreadsheet ("Updated List.xlsx") into
+ * records ready for the database.
  *
- * Pure functions, no DB — shared by scripts/import-master.ts and the tests.
- * The Forms export keeps "Married" and "Single" answers in separate columns;
- * we merge them into one clean record and recompute wristband totals.
+ * Sheet columns: EMP ID | EMP NAME | COUNT | CHILDREN | ADULT | ENTITY | DEPARTMENT
+ *
+ * Kept separate from the importer so the business rules are unit-testable
+ * without touching Excel or Postgres.
  */
-import { isValidEmail, isNonEmptyName, isValidMobile, normaliseMobile } from "./validation";
-import { wristbandTotal } from "./wristbands";
 
-/** A raw CSV row as produced by csv-parse with { columns: true }. */
-export type RawRow = Record<string, string>;
+import { MAX_ADULTS, MAX_CHILDREN, clampCount } from "./allotment";
+import { isCleanEmployeeId, isNonEmptyName } from "./validation";
 
-export interface CanonicalRecord {
-  /** Microsoft Forms response "Id" — unique per submission, used for idempotent import. */
-  form_id: string;
+/** A raw row, already pulled out of the sheet but not yet interpreted. */
+export interface RawSheetRow {
+  emp_id: unknown;
+  emp_name: unknown;
+  count: unknown;
+  children: unknown;
+  entity: unknown;
+  department: unknown;
+}
+
+export interface AllotmentRecord {
   employee_id: string;
   full_name: string;
-  email: string;
-  mobile: string;
-  marital_status: string;
-  family_members: string[];
-  paid_extended: string[];
-  wristbands_total: number;
+  entity: string;
+  department: string;
+  allotted_adults: number;
+  allotted_children: number;
   needs_review: boolean;
-  /** Kept only for de-duplication helpers/tests (not persisted). */
-  completion_time: Date | null;
-}
-
-export interface DedupeResult {
-  deduped: Array<CanonicalRecord & { duplicate_of: Array<{ employee_id: string; full_name: string }> }>;
-  duplicatesDropped: number;
+  /** Why the row was flagged. Printed by the importer, not persisted. */
+  review_reasons: string[];
 }
 
 /* -------------------------------------------------------------------------- */
-/* Small helpers                                                              */
+/* Cell reading                                                               */
 /* -------------------------------------------------------------------------- */
 
-const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-
-/** Split a ";"-separated list: trim entries, drop empties, de-dupe. */
-export function splitList(value: string | null | undefined): string[] {
-  if (!value) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const part of value.split(";")) {
-    const t = part.trim();
-    if (t && !seen.has(t)) {
-      seen.add(t);
-      out.push(t);
-    }
-  }
-  return out;
-}
-
-/** First trimmed non-empty string among the arguments (or ""). */
-export function firstNonEmpty(...values: Array<string | null | undefined>): string {
-  for (const v of values) {
-    const t = (v ?? "").trim();
-    if (t) return t;
-  }
-  return "";
+/**
+ * Strip characters that are invisible but break exact matching.
+ *
+ * The sheet contains employee IDs with a leading U+200E LEFT-TO-RIGHT MARK
+ * (e.g. "\u200e103054"), almost certainly from a copy-paste. Left alone they
+ * look like valid 6-digit IDs to a human but fail every digit check, so those
+ * people could not be found by ID at the desk.
+ *
+ * Also normalises non-breaking spaces to ordinary ones.
+ */
+export function stripInvisible(value: string): string {
+  return value
+    // zero-width space/non-joiner/joiner, LRM, RLM, BOM, word joiner
+    .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff\u2060]/g, "")
+    // non-breaking and narrow no-break spaces
+    .replace(/[\u00a0\u202f]/g, " ")
+    .trim();
 }
 
 /**
- * Resolve a raw row into a header-agnostic accessor. Headers are matched by
- * normalised name (trim + collapse whitespace + lowercase) so slight header
- * changes / trailing spaces don't break the import.
+ * Flatten an ExcelJS cell value to trimmed text.
+ *
+ * Cells are not always primitives: formulas arrive as { formula, result },
+ * shared formulas as { sharedFormula, result } and sometimes with NO cached
+ * result at all (21 rows of the ADULT column are like this), rich text as
+ * { richText: [...] }, and hyperlinks as { text, hyperlink }.
  */
-function accessor(row: RawRow) {
-  const map = new Map<string, string>();
-  for (const [key, val] of Object.entries(row)) {
-    map.set(norm(key), typeof val === "string" ? val : String(val ?? ""));
-  }
-  const exact = (header: string) => map.get(norm(header)) ?? "";
-  const byPrefix = (prefix: string): string[] => {
-    const p = norm(prefix);
-    const found: string[] = [];
-    for (const [k, v] of map.entries()) {
-      if (k.startsWith(p)) found.push(v);
+export function cellText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return stripInvisible(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if ("result" in o && o.result != null) return cellText(o.result);
+    if ("richText" in o && Array.isArray(o.richText)) {
+      return stripInvisible(
+        (o.richText as { text?: string }[]).map((t) => t.text ?? "").join("")
+      );
     }
-    return found;
-  };
-  return { exact, byPrefix };
+    if ("text" in o && o.text != null) return cellText(o.text);
+    // A formula with no cached result: nothing usable.
+    if ("formula" in o || "sharedFormula" in o) return "";
+  }
+  return stripInvisible(String(value));
 }
 
-/** Parse the Forms "M/D/YYYY H:mm" completion timestamp. Returns null if unparseable. */
-export function parseCompletionTime(value: string | null | undefined): Date | null {
-  const t = (value ?? "").trim();
-  if (!t) return null;
-  // e.g. "8/13/2026 11:30"
-  const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (m) {
-    const [, mm, dd, yyyy, hh, min, ss] = m;
-    const d = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(hh),
-      Number(min),
-      ss ? Number(ss) : 0
-    );
-    return isNaN(d.getTime()) ? null : d;
-  }
-  const fallback = new Date(t);
-  return isNaN(fallback.getTime()) ? null : fallback;
+/** Parse a cell to a non-negative integer. Blank/garbage becomes null. */
+export function cellInt(value: unknown): number | null {
+  const text = cellText(value);
+  if (text === "") return null;
+  const n = Number(text);
+  if (!Number.isFinite(n)) return null;
+  return Math.floor(n);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Entity aliases                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Entity spellings that mean the same thing but are not just a case difference.
+ * Case-only variants (SUBLIME/Sublime, PEPL Bangalore/PEPL bangalore) are
+ * folded automatically by `canonicaliseEntities`, so they do not belong here.
+ *
+ * Keys are lowercased. Adjust if the business disagrees with any of these.
+ */
+export const ENTITY_ALIASES: Record<string, string> = {
+  fashions: "Prestige Fashions",
+  k2k: "K2K Infra Bangalore",
+  "prestige mall management pvtld": "Prestige Mall Management",
+  pmmpl: "Prestige Mall Management",
+  fpms: "Falcon Property Management",
+};
 
 /* -------------------------------------------------------------------------- */
 /* Row mapping                                                                */
 /* -------------------------------------------------------------------------- */
 
-export function mapRow(row: RawRow): CanonicalRecord {
-  const { exact, byPrefix } = accessor(row);
+/**
+ * Interpret one sheet row.
+ *
+ * Adults are derived as COUNT - CHILDREN rather than read from the ADULT
+ * column, because ADULT is a formula whose cached result is missing on some
+ * rows and inconsistent on others (4 rows where CHILDREN + ADULT != COUNT).
+ * COUNT and CHILDREN are the typed source values, so they win.
+ */
+export function mapRow(row: RawSheetRow): AllotmentRecord {
+  const employee_id = cellText(row.emp_id);
+  const full_name = cellText(row.emp_name);
+  const rawEntity = cellText(row.entity);
+  const department = cellText(row.department);
 
-  const form_id = exact("Id").trim();
-  const employee_id = exact("Employee ID").trim();
-  const full_name = firstNonEmpty(exact("Full Name"), exact("Name"));
-  const marital_status = exact("Marital Status").trim();
+  const entityKey = rawEntity.toLowerCase();
+  const entity = ENTITY_ALIASES[entityKey] ?? rawEntity;
 
-  // email: Employee Email ID (Married) > Email Address (Single) > Email
-  const email = firstNonEmpty(
-    exact("Employee Email ID"),
-    exact("Email Address"),
-    exact("Email")
-  );
+  const count = cellInt(row.count);
+  const children = cellInt(row.children) ?? 0;
 
-  // mobile: Contact Number (Married) > Contact Number1 (Single), normalised
-  const rawMobile = firstNonEmpty(exact("Contact Number"), exact("Contact Number1"));
-  const mobile = normaliseMobile(rawMobile);
+  const review_reasons: string[] = [];
 
-  // family: Married Team Members… if populated, else Single Team Members…
-  const marriedFamily = splitList(byPrefix("Married Team Members").find((v) => v.trim()) ?? "");
-  const singleFamily = splitList(byPrefix("Single Team Members").find((v) => v.trim()) ?? "");
-  const family_members = marriedFamily.length > 0 ? marriedFamily : singleFamily;
+  if (!isNonEmptyName(full_name)) review_reasons.push("blank name");
+  if (employee_id === "") review_reasons.push("blank employee id");
+  else if (!isCleanEmployeeId(employee_id)) review_reasons.push("employee id is not 6 digits");
 
-  // paid extended: union of the two "Paid Wristband – Extended Family…" columns
-  const paidCols = byPrefix("Paid Wristband");
-  const paidSet: string[] = [];
-  const seenPaid = new Set<string>();
-  for (const col of paidCols) {
-    for (const item of splitList(col)) {
-      if (!seenPaid.has(item)) {
-        seenPaid.add(item);
-        paidSet.push(item);
-      }
-    }
+  if (count == null) review_reasons.push("blank COUNT");
+  else if (count <= 0) review_reasons.push(`COUNT is ${count}`);
+
+  const safeChildren = clampCount(children, MAX_CHILDREN);
+  if (children !== safeChildren) review_reasons.push(`CHILDREN out of range (${children})`);
+
+  // Adults = whatever is left after children. Negative means the sheet
+  // disagrees with itself, so clamp to zero and flag it.
+  const rawAdults = (count ?? 0) - safeChildren;
+  if (count != null && rawAdults < 0) {
+    review_reasons.push(`CHILDREN (${safeChildren}) exceeds COUNT (${count})`);
   }
-  const paid_extended = paidSet;
-
-  const wristbands_total = wristbandTotal(family_members, paid_extended);
-
-  const needs_review =
-    !/^\d+$/.test(employee_id) ||
-    !isNonEmptyName(full_name) ||
-    !isValidEmail(email) ||
-    !isValidMobile(mobile);
+  const allotted_adults = clampCount(rawAdults, MAX_ADULTS);
+  const allotted_children = safeChildren;
 
   return {
-    form_id,
     employee_id,
     full_name,
-    email,
-    mobile,
-    marital_status,
-    family_members,
-    paid_extended,
-    wristbands_total,
-    needs_review,
-    completion_time: parseCompletionTime(exact("Completion time")),
+    entity,
+    department,
+    allotted_adults,
+    allotted_children,
+    needs_review: review_reasons.length > 0,
+    review_reasons,
   };
 }
 
 /* -------------------------------------------------------------------------- */
-/* De-duplication                                                             */
+/* Entity canonicalisation (second pass)                                      */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Collapse rows sharing the same non-empty employee_id, keeping the most recent
- * submission by completion_time. Alternate submissions are recorded in
- * `duplicate_of`. Rows with an empty employee_id are never grouped (each is a
- * distinct person that failed to supply an ID) — they are kept individually.
+ * Fold entity spellings that differ only by case onto the most common variant,
+ * so "SUBLIME" (19 rows) and "Sublime" (16 rows) stop splitting reports.
+ *
+ * Returns the records with `entity` rewritten, plus the mapping applied so the
+ * importer can show what it changed.
  */
-export function dedupeByEmployeeId(records: CanonicalRecord[]): DedupeResult {
-  const groups = new Map<string, CanonicalRecord[]>();
-
-  records.forEach((rec, index) => {
-    const key = rec.employee_id ? `id:${rec.employee_id}` : `row:${index}`;
-    const arr = groups.get(key);
-    if (arr) arr.push(rec);
-    else groups.set(key, [rec]);
-  });
-
-  const deduped: DedupeResult["deduped"] = [];
-  let duplicatesDropped = 0;
-
-  for (const group of groups.values()) {
-    if (group.length === 1) {
-      deduped.push({ ...group[0], duplicate_of: [] });
-      continue;
-    }
-    // newest completion_time first; nulls sort last
-    const sorted = [...group].sort((a, b) => {
-      const at = a.completion_time?.getTime() ?? -Infinity;
-      const bt = b.completion_time?.getTime() ?? -Infinity;
-      return bt - at;
-    });
-    const [winner, ...rest] = sorted;
-    duplicatesDropped += rest.length;
-    deduped.push({
-      ...winner,
-      duplicate_of: rest.map((r) => ({ employee_id: r.employee_id, full_name: r.full_name })),
-    });
+export function canonicaliseEntities(records: AllotmentRecord[]): {
+  records: AllotmentRecord[];
+  changes: { from: string; to: string; rows: number }[];
+} {
+  // Count each exact spelling, grouped by its lowercase form.
+  const groups = new Map<string, Map<string, number>>();
+  for (const r of records) {
+    if (r.entity === "") continue;
+    const key = r.entity.toLowerCase();
+    const variants = groups.get(key) ?? new Map<string, number>();
+    variants.set(r.entity, (variants.get(r.entity) ?? 0) + 1);
+    groups.set(key, variants);
   }
 
-  return { deduped, duplicatesDropped };
+  // Winner per group, in priority order:
+  //   1. prefer a mixed-case spelling over a SHOUTED one ("Sublime" over
+  //      "SUBLIME"), since all-caps is usually a data-entry artefact. Genuine
+  //      acronyms like "PMMPL" have no mixed-case sibling, so are unaffected.
+  //   2. then the most common spelling.
+  //   3. then alphabetical, purely so the result is deterministic.
+  const isShouted = (s: string) => s === s.toUpperCase() && /[A-Z]/.test(s);
+
+  const canonical = new Map<string, string>();
+  for (const [key, variants] of groups) {
+    const winner = [...variants.entries()].sort((a, b) => {
+      const shout = Number(isShouted(a[0])) - Number(isShouted(b[0]));
+      if (shout !== 0) return shout;
+      return b[1] - a[1] || a[0].localeCompare(b[0]);
+    })[0][0];
+    canonical.set(key, winner);
+  }
+
+  const changeCounts = new Map<string, { from: string; to: string; rows: number }>();
+  const out = records.map((r) => {
+    if (r.entity === "") return r;
+    const to = canonical.get(r.entity.toLowerCase()) ?? r.entity;
+    if (to !== r.entity) {
+      const k = `${r.entity}->${to}`;
+      const existing = changeCounts.get(k);
+      if (existing) existing.rows++;
+      else changeCounts.set(k, { from: r.entity, to, rows: 1 });
+      return { ...r, entity: to };
+    }
+    return r;
+  });
+
+  return {
+    records: out,
+    changes: [...changeCounts.values()].sort((a, b) => b.rows - a.rows),
+  };
 }

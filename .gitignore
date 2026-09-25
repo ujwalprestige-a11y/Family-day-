@@ -31,8 +31,16 @@ yarn-error.log*
 /pgdata/
 
 # master data (contains employee PII — never commit)
-/data/*.csv
+# Ignore the whole data directory, plus spreadsheets anywhere in the tree.
+/data/
 *.csv
+*.xlsx
+*.xls
+
+# ...except the API route directory that is literally named "export.xlsx",
+# which the *.xlsx rule above would otherwise swallow.
+!app/api/admin/export.xlsx/
+!app/api/admin/export.xlsx/**
 
 # typescript
 *.tsbuildinfo

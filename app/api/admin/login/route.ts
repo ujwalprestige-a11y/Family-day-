@@ -3,7 +3,6 @@ import { checkPin, createSessionToken, SESSION_COOKIE, sessionCookieOptions } fr
 import { rateLimit, resetRateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-export const preferredRegion = "bom1"; // run in Mumbai, next to the Supabase DB
 
 // POST /api/admin/login { pin } — sets an httpOnly session cookie on success.
 // Rate-limited per IP; a successful login clears the counter.

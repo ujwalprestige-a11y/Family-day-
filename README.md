@@ -1,9 +1,13 @@
 # Prestige Family Day 2026 – Registration Desk
 
 A tablet/kiosk web app for the registration desk at **Beyond the Skyline** (26 September 2026).
-Guests find their pre-loaded record, confirm their details, pick family / paid extended-family
-wristbands, and check in. Staff can register walk-ins and view a live admin dashboard with an Excel
-export.
+
+Staff search for a guest by employee ID or name, see the wristbands that person was **allotted**
+(split into adults and children), adjust to the number **actually** turning up, and check them in.
+Walk-ins can be added at the desk, and a live admin dashboard compares allotted against issued with
+an Excel export.
+
+No contact details are collected or stored — the desk only records counts.
 
 - **Stack:** Next.js (App Router) + TypeScript + Tailwind, Prisma + PostgreSQL, `exceljs`.
 - **One deployable app.** Local dev runs on a local Postgres; production runs on Supabase; deploy to
@@ -42,8 +46,9 @@ In a **second terminal**:
 # 4. Create the database schema
 npm run prisma:migrate      # applies migrations (prisma migrate dev)
 
-# 5. Import the master guest list from the CSV
-npm run import
+# 5. Import the master allotment list
+npm run import -- --dry-run   # parse + report, write nothing
+npm run import                # replace the table with the sheet contents
 
 # 6. Run the app
 npm run dev                 # http://localhost:3000  (development)
@@ -70,59 +75,90 @@ npm run dev                 # http://localhost:3000  (development)
 
 ---
 
-## 3. Data import
+## 3. Data model
 
-The importer reads `data/Prestige_Family_Day_2026_Sheet1_.csv` (the Microsoft Forms export) and:
+One `Employee` table. The master sheet supplies the **allotment**; the desk fills in the **actuals**.
 
-- decodes it as **latin1 / CP1252** (the `₹` symbol is corrupted in the export);
-- merges the separate **Married** and **Single** answer columns into one record
-  (email, mobile, family members, paid extended family, full name, marital status);
-- trims every value and stores `employee_id` as a string;
-- **recomputes** `wristbands_total = 1 (self) + family members + paid extended` (the sheet's own total
-  column is ignored);
-- normalises mobiles (strips `+91`, spaces) and flags misaligned/incomplete rows with `needs_review`;
-- **keeps every row** — no de-duplication. The same `employee_id` may appear on several rows (people who
-  submitted more than once); the desk search shows each match with the name so staff pick the correct
-  one. Each row has a surrogate primary key (`id`); the Forms response `Id` is stored as `form_id`;
-- is **idempotent** by `form_id` — re-running upserts the same rows instead of creating duplicates, and
-  never overwrites walk-ins or resets anyone who has already checked in.
+| Field | Meaning |
+|---|---|
+| `employee_id`, `full_name` | From the sheet. `employee_id` is indexed but **not unique**. |
+| `entity`, `department` | Org context, shown at the desk to disambiguate people with the same name. |
+| `allotted_adults`, `allotted_children` | What the sheet says they opted for. `allotted_adults` **includes the employee**. |
+| `actual_adults`, `actual_children` | What was actually issued at the desk. Zero until check-in. |
+| `status` | `not_arrived` → `checked_in`. |
+| `source` | `master` (imported) or `walk_in` (added at the desk). |
+| `needs_review` | Set by the importer for rows staff should eyeball. |
+
+## 4. Data import
+
+The importer reads an Excel workbook (default `data/Updated List.xlsx`) with the columns
+`EMP ID | EMP NAME | COUNT | CHILDREN | ADULT | ENTITY | DEPARTMENT`.
+
+```bash
+npm run import                          # default file
+npm run import -- "path/to/other.xlsx"  # explicit file
+npm run import -- --dry-run             # parse + report, write nothing
+npm run import -- --force               # proceed even if people have checked in
+```
+
+What it does:
+
+- finds the header row by label (scanning the first 10 rows), so column order can change;
+- derives `allotted_adults = COUNT − CHILDREN` and `allotted_children = CHILDREN`. **The `ADULT`
+  column is ignored**: it is a formula whose cached result is missing on 21 rows and disagrees with
+  `COUNT − CHILDREN` on 4 more, so the typed source values win;
+- strips invisible characters (zero-width spaces, and the U+200E left-to-right mark that is glued to
+  the front of three otherwise-valid employee IDs);
+- folds entity spellings that differ only by case onto one variant, preferring mixed case over
+  ALL CAPS, so `SUBLIME` and `Sublime` stop splitting reports. Genuine acronyms such as `PMMPL` are
+  untouched. Non-case aliases live in `ENTITY_ALIASES` in `lib/mapping.ts`;
+- flags rows with `needs_review` rather than dropping them — an `employee_id` that is not 6 digits,
+  a blank name, a `COUNT` of 0, or `CHILDREN` exceeding `COUNT`;
+- **replaces the whole table** in a single transaction. There is no merge path: the sheet is the
+  source of truth, so a re-import is a full reset.
+
+> **Safety gate.** If anyone has already checked in, the importer refuses to run and tells you to
+> export first. `--force` overrides it. Use `--dry-run` freely — it never writes.
 
 It prints a report, e.g.:
 
 ```
-Prestige Family Day 2026 — import report
-  Rows read:            1389
-  Rows imported:        1389
-  Unique employee IDs:  1200
-  Rows flagged review:  117
-Done in 5.8s
+Sheet:                 "Updated Sheet"
+Rows parsed:           1367
+Unique employee IDs:   1367
+Allotted adults:       2642
+Allotted children:     1140
+Allotted total:        3782
+Flagged for review:    85
 ```
 
-> The CSV contains employee PII and is **git-ignored**. Keep it out of version control.
+> The spreadsheet contains employee PII. `/data/`, `*.xlsx` and `*.csv` are **git-ignored**.
 
 ---
 
-## 4. Tests
+## 5. Tests
 
 ```bash
 npm test
 ```
 
 Requires the local Postgres to be running (`npm run db:local`). Tests run against an **isolated `test`
-schema** so they never touch your imported data. Coverage:
+schema** so they never touch your imported data. 83 tests covering:
 
-- **Import mapping** — Married/Single merge, email/mobile fallback precedence, `;`-splitting,
-  mobile normalisation, wristband recomputation, de-duplication by latest submission, and
-  misaligned-row flagging.
-- **Register API** — validation (422), edited-fields tracking, idempotent `already_registered`,
-  404 for unknown id.
-- **Walk-in API** — required-field validation, duplicate-id rejection (409), computed wristbands.
-- **Export** — three sheets, Summary counts, Employee ID & Mobile stored as text, bold + frozen
-  header, and the session gate (401 without a session).
+- **Import mapping** — Excel cell reading (formulas with and without cached results, rich text),
+  invisible-character stripping, `COUNT − CHILDREN` derivation, review flagging, and entity
+  canonicalisation.
+- **Allotment helpers** — count clamping against junk input, and over-allotment detection.
+- **Check-in API** — 404, 400, 422 (missing count, zero wristbands), clamping, over-allotment
+  reporting, and that a correction updates counts while preserving the first arrival time.
+- **Walk-in API** — required fields, the 6-digit ID rule, duplicate rejection (409), zero-wristband
+  rejection, and that walk-ins get no allotment.
+- **Export** — three sheets, Summary reconciliation, difference and over-allotment columns,
+  Employee ID stored as text, bold + frozen header, and the session gate (401 without a session).
 
 ---
 
-## 5. Environment variables
+## 6. Environment variables
 
 | Variable | Purpose |
 |----------|---------|
@@ -141,30 +177,27 @@ See `.env.example` for ready-to-use local values.
 
 ---
 
-## 6. Deployment (Vercel + Supabase)
+## 7. Deployment (Vercel + Supabase)
 
 1. **Create a Supabase project.** From *Project Settings → Database*, copy the connection strings:
    - the **pooled** connection (port 6543, `?pgbouncer=true`) → `DATABASE_URL`
    - the **direct** connection (port 5432) → `DIRECT_URL` (used for migrations)
 
-   To use `DIRECT_URL`, add it to the Prisma datasource:
-   ```prisma
-   datasource db {
-     provider  = "postgresql"
-     url       = env("DATABASE_URL")
-     directUrl = env("DIRECT_URL")
-   }
-   ```
+   `directUrl` is already wired into the Prisma datasource, so no schema edit is needed.
+
+   Functions are pinned to Mumbai (`bom1`) via `vercel.json` to sit next to the database.
 
 2. **Apply the schema to Supabase:**
    ```bash
    DATABASE_URL="<direct-url>" npm run prisma:deploy   # prisma migrate deploy
    ```
 
-3. **Import the master list once** against Supabase:
+3. **Import the master list** against Supabase. Dry-run first:
    ```bash
+   DATABASE_URL="<direct-url>" npm run import -- --dry-run
    DATABASE_URL="<direct-url>" npm run import
    ```
+   Remember this **replaces** the table. Mid-event, export before using `--force`.
 
 4. **Deploy to Vercel.** Import the repo, then set env vars in *Project → Settings → Environment
    Variables*: `DATABASE_URL` (pooled), `DIRECT_URL`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `ADMIN_PIN`,
@@ -179,13 +212,13 @@ No schema or code changes are needed to switch between local and Supabase — on
 
 ## 7. Performance & security notes
 
-- **Search** responds well under the 200 ms target for ~1,500 records (indexed prefix on `employee_id`
-  and an index on `full_name`, capped at 8 results). Measure locally with any query, e.g. time
-  `GET /api/search?q=ra`.
-- Search results **never expose** full email or mobile — mobiles are masked as `XXXXXX1234`. The full
-  record is returned only via `/api/employee/:id` after the guest selects a result.
-- Admin routes require a signed, httpOnly session cookie (8h). The PIN is compared in constant time,
-  and both search and admin login are rate-limited (in-memory; see below).
+- **Search** responds well under the 200 ms target for the 1,367 imported records (indexed prefix on
+  `employee_id`, index on `full_name`). It needs 3 characters and returns **all** matches, uncapped.
+- **No contact details exist to leak.** Email, mobile and marital status were removed with the
+  allotment model, so search and `/api/employee/:id` return only name, org context and counts.
+- **Two independent gates.** `/login` (static username + password) fronts the entire app via
+  `proxy.ts`; `/admin` additionally requires the PIN. Both use signed, httpOnly cookies, and both
+  PIN and password are compared in constant time. Login attempts are rate-limited.
 - The rate limiter is in-memory, which suits a single kiosk node. If the app is scaled to multiple
   instances, swap `lib/rate-limit.ts` for a shared store (e.g. Upstash Redis).
 
@@ -194,15 +227,16 @@ No schema or code changes are needed to switch between local and Supabase — on
 ## 8. Project structure
 
 ```
-app/                     # App Router: guest kiosk (page.tsx), /admin, and /api routes
-components/              # Brand, Chip, CheckTick
-lib/                     # db, mapping, validation, wristbands, mask, session, rate-limit, export
+app/                     # App Router: kiosk (page.tsx), /login, /admin, /api routes
+proxy.ts                 # app-wide sign-in gate (Next 16 renamed middleware -> proxy)
+components/              # Brand, CheckTick, LoadingOverlay, AllotmentCounter
+lib/                     # db, allotment, mapping, validation, session, rate-limit, export, types
 prisma/schema.prisma     # Employee model (Postgres)
-scripts/import-master.ts # CSV → DB importer
+scripts/import-master.ts # xlsx → DB importer (full replace)
 scripts/local-db.ts      # local embedded Postgres runner
 __tests__/               # Vitest unit + API tests
-data/                    # master CSV (git-ignored)
-public/theme.png         # event poster (replace the placeholder)
+data/                    # master spreadsheet (git-ignored)
+vercel.json              # pins functions to Mumbai (bom1)
 ```
 
 ---
@@ -214,7 +248,7 @@ public/theme.png         # event poster (replace the placeholder)
 | `npm run db:local` | Start the local embedded Postgres (leave running). |
 | `npm run prisma:migrate` | Create/apply migrations locally (`migrate dev`). |
 | `npm run prisma:deploy` | Apply migrations in production (`migrate deploy`). |
-| `npm run import` | Import the master CSV. |
+| `npm run import` | Replace the table from the master spreadsheet. Supports `-- --dry-run` and `-- --force`. |
 | `npm run dev` | Start the Next.js dev server. |
 | `npm run build` / `npm start` | Production build / start. |
 | `npm test` | Run the test suite. |
@@ -238,9 +272,8 @@ Key tokens:
 | `--gold-ink` | `#8A6D2B` | Small gold text (links, IDs, date, required marks) — kept ≥ 4.5:1 on white |
 | `--gold-hover` | `#8F7337` | Primary button hover |
 | `--ink` / `--ink-2` | `#1F1A12` / `#5B5648` | Primary / secondary text |
-| `--paper` / `--soft-gold` | `#FBF8F1` / `#F3ECDB` | Tints for tiles, tally, selected chips |
+| `--paper` / `--soft-gold` | `#FBF8F1` / `#F3ECDB` | Tints for tiles, steppers, over-allotment highlight |
 | `--line` / `--line-2` | `#E4DCC8` / `#CDBF9C` | Card and input borders |
-| `--paid-fill` | `#EADBB4` | Selected paid-extended chips |
 | `--danger` / `--ok` | `#B3261E` / `#2E7D4F` | Errors / success |
 
 Font stack: `'Grandview', 'Segoe UI', <Source Sans 3>, Arial, sans-serif`. Grandview is the proprietary
@@ -253,6 +286,23 @@ Accessibility: touch targets are ≥ 56px, focus outlines are a solid dark 3px r
 
 ### Loading feedback
 
-Fetches that can take a moment — loading a guest's details, confirming a registration, and submitting a
+Fetches that can take a moment — loading a guest's details, confirming a check-in, and submitting a
 walk-in — show a blocking gold spinner overlay (`components/LoadingOverlay.tsx`) with an accessible
 `role="alert"` message, so staff always see that something is happening.
+
+---
+
+## 11. Desk flow
+
+1. **Search** by employee ID or name (3+ characters). Results show the allotted adult/children split
+   plus entity and department, and tag anyone already checked in.
+2. **Confirm.** The counters are pre-filled with the allotment, so the common case is one tap. Adjust
+   up or down for who actually turned up. Going above the allotment is allowed and shows a notice —
+   it is recorded as over allotment rather than blocked.
+3. **Welcome** confirms the issued split, then returns to search after 8 seconds.
+
+Re-selecting someone who is already checked in reopens the same screen pre-filled with what was
+issued, so **staff can correct a mistake**. The original arrival time is kept.
+
+Guests not in the list go through **Add as a new guest**: a 6-digit employee ID, a name, optional
+entity/department, and the counts. They get no allotment, so everything issued shows as extra.
