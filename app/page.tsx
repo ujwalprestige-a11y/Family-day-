@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
 import { CheckTick } from "@/components/CheckTick";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
@@ -15,6 +16,7 @@ type Screen = "search" | "confirm" | "welcome" | "already" | "walkin";
 const AUTO_RETURN_MS = 8000;
 
 export default function KioskPage() {
+  const router = useRouter();
   const [screen, setScreen] = useState<Screen>("search");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -224,6 +226,18 @@ export default function KioskPage() {
     } finally {
       setWSubmitting(false);
       setBusy(null);
+    }
+  }
+
+  /* ---------------------------- lock device -------------------------- */
+  // Clears the app-gate cookie so the next person has to sign in again.
+  async function lockDevice() {
+    setBusy("Signing out…");
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } finally {
+      router.replace("/login");
+      router.refresh();
     }
   }
 
@@ -546,6 +560,9 @@ export default function KioskPage() {
         <Link href="/admin" className="foot" style={{ color: "var(--muted)" }}>
           Staff sign-in
         </Link>
+        <button type="button" onClick={lockDevice} style={{ color: "var(--muted)" }}>
+          Lock this device
+        </button>
       </div>
     </main>
   );

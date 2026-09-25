@@ -128,8 +128,14 @@ schema** so they never touch your imported data. Coverage:
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string (local embedded Postgres, or Supabase in prod). |
 | `DIRECT_URL` | *(prod, optional)* Non-pooled Supabase URL for running migrations. |
-| `ADMIN_PIN` | PIN for the `/admin` sign-in screen. |
-| `SESSION_SECRET` | Long random string used to sign the admin session cookie. |
+| `AUTH_USERNAME` | **Required.** Username for the `/login` gate that fronts the whole app. |
+| `AUTH_PASSWORD` | **Required.** Password for the `/login` gate. |
+| `ADMIN_PIN` | PIN for the `/admin` sign-in screen (a second, separate gate). |
+| `SESSION_SECRET` | Long random string used to sign both session cookies. |
+
+`AUTH_USERNAME` and `AUTH_PASSWORD` fail closed: if either is missing, `/login`
+returns 503 and **nothing** in the app is reachable. Set them in every
+environment, including Vercel.
 
 See `.env.example` for ready-to-use local values.
 
@@ -161,8 +167,11 @@ See `.env.example` for ready-to-use local values.
    ```
 
 4. **Deploy to Vercel.** Import the repo, then set env vars in *Project → Settings → Environment
-   Variables*: `DATABASE_URL` (pooled), `DIRECT_URL`, `ADMIN_PIN`, `SESSION_SECRET`. The build runs
-   `prisma generate && next build`.
+   Variables*: `DATABASE_URL` (pooled), `DIRECT_URL`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `ADMIN_PIN`,
+   `SESSION_SECRET`. The build runs `prisma generate && next build`.
+
+   Miss `AUTH_USERNAME` / `AUTH_PASSWORD` and the deployment is locked to everyone — the gate fails
+   closed by design. Set them before the first deploy.
 
 No schema or code changes are needed to switch between local and Supabase — only `DATABASE_URL`.
 
